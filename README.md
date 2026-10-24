@@ -16,16 +16,20 @@ For the exact validated Windows dependency versions, install with `python -m pip
 
 Data defaults to `%LOCALAPPDATA%\JobMatchLocalAI`, outside the repository. Override with `JOBMATCH_HOME` or `jobmatch --data-dir C:\path\to\private <command>`. Use the same directory for every command. Do not place it in a cloud-synchronized folder or a shared location.
 
-Fill `cv.txt` with your CV as plain UTF-8 text and `preferences.txt` with desired roles, location, remote policy, seniority, salary and deal breakers. PDF/DOCX imports are intentionally not supported: export the relevant text first. Settings are in `settings.json`; the default model is `qwen2.5:7b` and the interval is three hours.
+Fill `cv.txt` with your CV as plain UTF-8 text and `preferences.txt` with desired roles, location, remote policy, seniority, salary and deal breakers. PDF/DOCX imports are intentionally not supported: export the relevant text first. Settings are in `settings.json`; the default model is `qwen3:4b-instruct` and the interval is three hours.
 
 Install/start Ollama and download the model explicitly:
 
 ```powershell
-ollama pull qwen2.5:7b
+ollama pull qwen3:4b-instruct
 ollama serve
 ```
 
-If the Ollama Windows application already serves port 11434, do not start a second server. Only the loopback Ollama endpoint is used. Cloud model names and remote aliases are rejected. Configure Ollama with cloud features disabled (`OLLAMA_NO_CLOUD=1`) for defense in depth. A 7B quantized model is a reasonable starting point for an 8 GB GPU; memory use depends on context and other applications.
+If the Ollama Windows application already serves port 11434, do not start a second server. Only the loopback Ollama endpoint is used. Cloud model names and remote aliases are rejected. Configure Ollama with cloud features disabled (`OLLAMA_NO_CLOUD=1`) for defense in depth. A 4B quantized model is a reasonable starting point for an 8 GB GPU; memory use depends on context and other applications.
+
+The active configuration is `%LOCALAPPDATA%\JobMatchLocalAI\settings.json` (or the selected private data directory). Set `"model": "qwen3:4b-instruct"` and `"ollama_url": "http://localhost:11434"`. Only localhost and 127.0.0.1 on port 11434 are accepted. Python ignores environment proxy settings and never follows HTTP redirects. Model metadata is checked before sending any CV or email excerpt. The application never downloads models automatically or falls back to cloud inference. `doctor` reports the configured endpoint, installed models and whether the configured model is present.
+
+Analysis returns a validated JSON object: `score` (indicative 0–100, not a hiring probability), `confidence`, `reasons` (evidenced matches), `concerns` (evidenced incompatibilities), and `missing_information` (unknown facts). Unknowns must not be treated as incompatibilities. Inference disables thinking output and uses deterministic temperature settings. Connection timeouts are five seconds and inference timeouts are 240 seconds. Connection, timeout, HTTP and invalid-response failures have safe error categories; failed offers remain pending and are retried by the next synchronization. Response bodies containing personal information are never included in error messages.
 
 ## Gmail authorization (personal setup required)
 
@@ -48,7 +52,9 @@ The only requested scope is `https://www.googleapis.com/auth/gmail.readonly`. Au
 
 The dashboard is at http://127.0.0.1:8501. It starts only on request and does not synchronize. Refresh after a sync. The scheduled task runs at user logon, repeats at the configured interval, and exits after each sync. It uses the current Windows user without storing a password and ignores overlapping runs. Re-run `install-task` after changing `interval_hours`, the virtual environment, or the data directory. `remove-task` removes it. The task requires a logged-in session; it does not wake or sign in to Windows. Ollama must be available when it runs.
 
-The first sync includes the previous 30 days by default. This initial boundary is saved, so older unprocessed messages cannot fall out of a sliding time window. The configurable `max_messages` limits new email ingestion per invocation; remaining mail is processed on subsequent runs. Gmail result pages are scanned for unknown IDs; known messages are never downloaded again. This deliberately favors recovery and correctness over mailbox-scale history cursor complexity. Gmail list scanning grows over time.
+Every sync uses a rolling window of the last 24 hours, configurable through `lookback_hours` in the private `settings.json`. Gmail filtering and analysis eligibility use the email receipt timestamp, not the job publication date (which is often unknown). The configurable `max_messages` limits new email ingestion per invocation. Known messages are never downloaded again. Older saved offers remain in SQLite, but they are not analyzed unless recommended again in a recent email. The panel defaults to this same window; enable **Include older saved offers** to browse the archive. The previous persisted initial-history boundary is no longer used.
+
+`max_analyses` limits local model calls per invocation (default 20), independently of email ingestion. Pending offers remain eligible only while their recommendation email is inside the rolling window. Offers can therefore age out before analysis if the backlog exceeds processing capacity or the computer is off for more than 24 hours. For a shorter manual validation, use `jobmatch --max-analyses 3 sync`; this override does not change scheduled settings. Repeated syncs may analyze more eligible pending offers, but never create duplicate job IDs. Interruptions mark the run as failed and preserve already committed work.
 
 Job IDs normalize tracking links and deduplicate offers across emails. Message extraction is transactional. Analysis failures are retained and retried on the next invocation. CV, preferences, model and prompt version determine an analysis fingerprint; changed profiles trigger reanalysis. The dashboard flags old results until updated. Empty or unsupported emails are recorded and counted visibly. Only recognized LinkedIn job URLs are extracted; shortened redirects and future email formats may need parser updates. No redirects are followed. Repeated emails do not enrich previously stored job excerpts.
 

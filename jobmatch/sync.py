@@ -11,7 +11,7 @@ from jobmatch.parsing import extract
 from jobmatch.storage import connect
 
 
-def sync(api=None, evaluator=analyze):
+def sync(api=None, evaluator=analyze, max_analyses=None):
     with FileLock(str(home() / "sync.lock"), timeout=0):
         cfg = settings()
         candidate = profile()
@@ -22,18 +22,7 @@ def sync(api=None, evaluator=analyze):
         db.commit()
         counts = {"messages": 0, "analyzed": 0, "errors": 0}
         try:
-            # Fixed initial boundary persists across runs: no unread backlog is lost.
-            db.execute(
-                "CREATE TABLE IF NOT EXISTS state(key TEXT PRIMARY KEY, value TEXT)"
-            )
-            db.execute(
-                "INSERT OR IGNORE INTO state VALUES ('since', ?)",
-                (str(int(time.time()) - cfg.initial_days * 86400),),
-            )
-            since = db.execute("SELECT value FROM state WHERE key='since'").fetchone()[
-                0
-            ]
-            db.commit()
+            since = int(time.time()) - cfg.lookback_hours * 3600
             for message_id in gmail.message_ids(
                 api, f"({cfg.gmail_query}) after:{since}"
             ):
@@ -47,13 +36,16 @@ def sync(api=None, evaluator=analyze):
                     .get(userId="me", id=message_id, format="full")
                     .execute(num_retries=3)
                 )
+                received = int(message.get("internalDate", 0))
+                if received < since * 1000:
+                    continue
                 jobs = extract(message)
                 with db:
                     db.execute(
                         "INSERT INTO messages(id,received,status,job_count) VALUES (?,?,?,?)",
                         (
                             message_id,
-                            int(message.get("internalDate", 0)),
+                            received,
                             "parsed" if jobs else "no_jobs",
                             len(jobs),
                         ),
@@ -71,8 +63,11 @@ def sync(api=None, evaluator=analyze):
                 if counts["messages"] >= cfg.max_messages:
                     break
             for row in db.execute(
-                "SELECT * FROM jobs WHERE analysis IS NULL OR profile_hash != ?",
-                (digest,),
+                "SELECT j.* FROM jobs j WHERE (analysis IS NULL OR profile_hash != ?) "
+                "AND EXISTS (SELECT 1 FROM message_jobs mj JOIN messages m ON m.id=mj.message_id "
+                "WHERE mj.job_id=j.id AND m.received >= ?) "
+                "ORDER BY first_seen DESC, id LIMIT ?",
+                (digest, since * 1000, max_analyses or cfg.max_analyses),
             ).fetchall():
                 try:
                     result = evaluator(
@@ -102,7 +97,7 @@ def sync(api=None, evaluator=analyze):
                     ),
                 )
             return counts
-        except Exception:
+        except BaseException:
             with db:
                 db.execute(
                     "UPDATE runs SET finished=CURRENT_TIMESTAMP,status='failed' WHERE id=?",

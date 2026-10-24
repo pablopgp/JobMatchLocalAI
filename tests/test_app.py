@@ -1,5 +1,6 @@
 import base64
 import json
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -28,7 +29,7 @@ def mail(id="m1"):
     html = '<table><tr><td><a href="https://www.linkedin.com/jobs/view/12345/?trk=email">Python engineer</a> Remote Madrid</td></tr></table>'
     return {
         "id": id,
-        "internalDate": "1700000000000",
+        "internalDate": str(int(time.time() * 1000)),
         "payload": {
             "headers": [
                 {"name": "From", "value": "Jobs <jobalerts-noreply@linkedin.com>"}
@@ -120,11 +121,12 @@ def test_ollama_transport(monkeypatch):
     original = httpx.Client
 
     def handler(request):
-        assert request.url.host == "127.0.0.1"
+        assert request.url.host == "localhost"
         if request.url.path == "/api/show":
             return httpx.Response(200, json={})
         body = json.loads(request.content)
         assert body["stream"] is False
+        assert body["think"] is False
         assert body["format"]["type"] == "object"
         return httpx.Response(
             200, json={"message": {"content": evaluation().model_dump_json()}}
@@ -200,3 +202,59 @@ def test_scheduler_xml(monkeypatch):
     assert "PT3H" in xml
     assert "InteractiveToken" in xml
     assert "--data-dir" in xml
+
+
+def test_analysis_batch_preserves_pending_work():
+    first = mail()
+    second = mail("m2")
+    raw = base64.urlsafe_b64decode(second["payload"]["body"]["data"] + "==").decode()
+    second["payload"]["body"]["data"] = base64.urlsafe_b64encode(
+        raw.replace("12345", "67890").encode()
+    ).decode()
+    assert sync(api_for([first, second]), evaluation, max_analyses=1)["analyzed"] == 1
+    assert sync(api_for([]), evaluation, max_analyses=1)["analyzed"] == 1
+    assert sync(api_for([]), evaluation, max_analyses=1)["analyzed"] == 0
+
+
+def test_rolling_window_skips_old_mail_and_old_pending_analyses():
+    recent = mail("recent")
+    api = api_for([recent])
+    assert sync(api, evaluation)["analyzed"] == 1
+    query = api.users().messages().list.call_args.kwargs["q"]
+    cutoff = int(query.rsplit("after:", 1)[1])
+    assert abs(cutoff - (int(time.time()) - 86400)) < 2
+    with connect() as db:
+        db.execute("UPDATE messages SET received=?", ((cutoff - 1) * 1000,))
+        db.execute("UPDATE jobs SET analysis=NULL,profile_hash=NULL")
+    old = mail("old")
+    old["internalDate"] = str((cutoff - 10) * 1000)
+    assert sync(api_for([old]), evaluation) == {
+        "messages": 0,
+        "analyzed": 0,
+        "errors": 0,
+    }
+    with connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
+
+
+def test_recent_recommendation_makes_existing_offer_eligible_again():
+    sync(api_for([mail()]), evaluation)
+    with connect() as db:
+        db.execute("UPDATE messages SET received=0")
+        db.execute("UPDATE jobs SET analysis=NULL,profile_hash=NULL")
+    assert sync(api_for([mail("new-recommendation")]), evaluation)["analyzed"] == 1
+
+
+def test_dashboard_hides_old_offers_without_deleting_them():
+    sync(api_for([mail()]), evaluation)
+    with connect() as db:
+        db.execute("UPDATE messages SET received=0")
+    app = AppTest.from_file(
+        str(Path(__file__).parents[1] / "jobmatch" / "dashboard.py")
+    ).run(timeout=20)
+    assert not app.exception
+    assert app.metric[0].value == "0"
+    app.checkbox[0].check().run()
+    assert not app.exception
+    assert app.metric[0].value == "1"

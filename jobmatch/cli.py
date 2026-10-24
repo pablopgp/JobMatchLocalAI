@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import httpx
+from googleapiclient.errors import HttpError
 
 from jobmatch.config import home, initialize, settings
 
@@ -20,11 +21,14 @@ def doctor():
         "preferences": bool((root / "preferences.txt").read_text("utf-8").strip()),
     }
     try:
-        with httpx.Client(trust_env=False, timeout=5) as client:
-            response = client.get("http://127.0.0.1:11434/api/tags")
+        cfg = settings()
+        result["configured_model"] = cfg.model
+        result["ollama_url"] = cfg.ollama_url
+        with httpx.Client(trust_env=False, timeout=5, follow_redirects=False) as client:
+            response = client.get(f"{cfg.ollama_url}/api/tags")
             response.raise_for_status()
             result["ollama_models"] = [m["name"] for m in response.json()["models"]]
-            result["configured_model"] = settings().model
+            result["configured_model_available"] = cfg.model in result["ollama_models"]
     except Exception as exc:
         result["ollama_error"] = type(exc).__name__
     print(json.dumps(result, indent=2))
@@ -33,6 +37,13 @@ def doctor():
 def main():
     parser = argparse.ArgumentParser(description="Private local job matching")
     parser.add_argument("--data-dir", type=Path)
+    parser.add_argument(
+        "--max-analyses",
+        type=int,
+        choices=range(1, 5001),
+        metavar="1-5000",
+        help="Override the analysis batch size for this sync only",
+    )
     parser.add_argument(
         "command",
         choices=[
@@ -62,7 +73,7 @@ def main():
         elif args.command == "sync":
             from jobmatch.sync import sync
 
-            result = sync()
+            result = sync(max_analyses=args.max_analyses)
             print(json.dumps(result))
             return 1 if result["errors"] else 0
         elif args.command == "dashboard":
@@ -90,6 +101,8 @@ def main():
             if isinstance(exc, RuntimeError)
             else "Run doctor and consult README.md."
         )
+        if isinstance(exc, HttpError):
+            detail = f"Gmail API returned HTTP {exc.resp.status}. Saved offers are preserved; retry synchronization."
         print(f"Operation failed ({type(exc).__name__}): {detail}", file=sys.stderr)
         return 1
     return 0

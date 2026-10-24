@@ -1,4 +1,5 @@
 import json
+import time
 
 import streamlit as st
 
@@ -8,12 +9,21 @@ from jobmatch.storage import connect
 
 st.set_page_config(page_title="JobMatch Local AI", layout="wide")
 initialize()
+cfg = settings()
+since = (int(time.time()) - cfg.lookback_hours * 3600) * 1000
 st.title("JobMatch Local AI")
 st.caption("Private email evidence • Local inference • No LinkedIn access")
 db = connect()
+include_archive = st.sidebar.checkbox("Include older saved offers", value=False)
 try:
     rows = [
-        dict(row) for row in db.execute("SELECT * FROM jobs ORDER BY first_seen DESC")
+        dict(row)
+        for row in db.execute(
+            "SELECT j.* FROM jobs j WHERE ? OR EXISTS "
+            "(SELECT 1 FROM message_jobs mj JOIN messages m ON m.id=mj.message_id "
+            "WHERE mj.job_id=j.id AND m.received >= ?) ORDER BY first_seen DESC",
+            (include_archive, since),
+        )
     ]
     runs = [
         dict(row) for row in db.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 10")
@@ -43,6 +53,11 @@ except RuntimeError:
     digest = None
     st.info("Add your CV and preferences to the private data directory before syncing.")
 st.metric("Stored offers", len(rows))
+st.caption(
+    f"Showing offers received by email in the last {cfg.lookback_hours} hours."
+    if not include_archive
+    else "Showing all saved offers."
+)
 items = []
 for row in rows:
     result = json.loads(row["analysis"]) if row["analysis"] else None
@@ -68,15 +83,22 @@ for row, result in items:
                     "This analysis uses an older profile or model. Run sync to update it."
                 )
             for field, title in [
-                ("reasons", "Compatibility reasons"),
-                ("concerns", "Concerns"),
-                ("missing_information", "Missing information"),
+                ("reasons", "Matches"),
+                ("concerns", "Incompatibilities and concerns"),
+                ("missing_information", "Unknown information"),
             ]:
                 st.write(title)
                 for text in result[field]:
                     st.text(f"• {text}")
         if row["error"]:
             st.warning(f"Analysis failed: {row['error']}. Next sync will retry.")
+            guidance = {
+                "OllamaConnectionError": "Start the Ollama Windows application and check the local endpoint in settings.json.",
+                "OllamaTimeoutError": "Check available memory and Ollama activity before retrying.",
+                "OllamaResponseError": "Check that the configured model is installed and inspect Ollama's local logs.",
+            }
+            if row["error"] in guidance:
+                st.info(guidance[row["error"]])
         st.write("Email evidence")
         st.text(row["context"])
 with st.expander("Recent synchronization runs"):
