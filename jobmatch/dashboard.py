@@ -169,10 +169,11 @@ for row, result in items[(page - 1) * 12 : page * 12]:
     card_key = "offer_" + hashlib.sha256(row["id"].encode()).hexdigest()[:16]
     if row["viewed"]:
         st.html(f"""<style>
-        .st-key-{card_key} {{background-color:#e0f2fe; border-color:#7dd3fc;}}
-        .st-key-{card_key} h3, .st-key-{card_key} [data-testid="stText"],
-        .st-key-{card_key} [data-testid="stCaptionContainer"],
-        .st-key-{card_key} [data-testid="stCaptionContainer"] p {{color:#0c4a6e;}}
+        .st-key-{card_key} {{
+            background-color:rgba(147,197,253,0.18);
+            border-color:rgba(96,165,250,0.55);
+            box-shadow:inset 3px 0 0 #93c5fd;
+        }}
         </style>""")
     with st.container(border=True, key=card_key):
         chart_column, details_column = st.columns([1, 3])

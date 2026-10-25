@@ -160,7 +160,9 @@ def test_viewed_highlight_and_confirmed_empty_trash_ui():
     assert not app.exception
     with connect() as db:
         assert db.execute("SELECT viewed FROM jobs").fetchone()[0] == 1
-    assert "#e0f2fe" in str(app.get("html")[0].proto)
+    viewed_style = str(app.get("html")[0].proto)
+    assert "rgba(147,197,253,0.18)" in viewed_style
+    assert "color:#0c4a6e" not in viewed_style
     assert next(b for b in app.button if b.key == "viewed_123").label == "Viewed ✓"
     next(b for b in app.button if b.key == "delete_123").click().run()
     app.radio[0].set_value("Trash").run()
