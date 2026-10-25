@@ -58,3 +58,43 @@ This update supersedes the OAuth and real-data blockers above.
 - Real validation sync: **0 new messages, 3 analyses, 0 errors**. The real dashboard rendered **27 offers** in the 24-hour window with no exceptions; the full archive retained 474 unique offers.
 - **25 tests passed**, with Ruff checks passing. Coverage includes old pending offers being skipped, recent recommendations making existing offers eligible, and archive visibility without deletion.
 - Older pending offers can age out without analysis; this is intentional under the requested rolling-window behavior.
+
+## Friendlier offer cards — 2026-10-24
+
+- Added circular compatibility charts with numeric percentages; pending analysis is displayed without an invented score.
+- Added company display and title recovery using existing saved email evidence, plus a safe canonical LinkedIn link button. No Gmail retrieval or model analysis was performed for this UI update.
+- Real-data check: 474 saved offers retained; 429 have recoverable company metadata. Dashboard rendered without exceptions, with 12 offer buttons and three scored charts on the first page. Unknown companies are explicitly marked.
+- Added 12-offer pagination, summary metrics and company-aware search. Companies are stored for future extractions with an additive SQLite migration. HTML job cards are preferred over full plain-text digests.
+- **29 tests passed**; Ruff checks passed. New coverage checks correct job/company association, HTML preference, circular charts at zero/full scores, and safe offer links.
+
+## Saved offers, follow-up and deletion — 2026-10-25
+
+- Added additive SQLite migration for saved flag, follow-up status, private notes and deletion timestamp. Existing evidence and analyses are preserved.
+- Saved offers remain visible beyond the rolling email window and have a dedicated view. Status and notes persist across sessions; they are never included in model prompts.
+- Delete moves an offer to a reversible Trash view. New recommendations cannot restore it automatically, and deleted offers are excluded from analysis. Restore preserves notes and status.
+- **33 tests passed**, including legacy migration, persistence, deleted-offer deduplication and UI save/edit/delete/restore flows. No real messages were retrieved and no real inference was run for this change.
+
+## Radial score previews — 2026-10-25
+
+- Every offer preview now includes a radial indicator. Analyzed offers use the exact saved score with an explicit `/ 100` denominator. Pending offers show a neutral ring labeled Pending / Not analyzed, rather than a fabricated zero.
+- **34 tests passed**, including checks that card charts receive the persisted score and that zero/full/pending values render correctly. No Gmail synchronization or inference was executed.
+
+## Manual resynchronization button — 2026-10-25
+
+- Added a sidebar button starting a hidden one-shot background worker. It checks new Gmail messages and reanalyzes all eligible non-deleted offers in the configured 24-hour window, preserving deduplication and existing notes/statuses.
+- Normal scheduled/CLI sync remains incremental and batched. Explicit full resync processes all eligible work in one finite invocation. UI stays responsive and exposes status/result counts after refresh.
+- **39 tests passed**, covering explicit button activation, worker success/safe failures, overlapping-process prevention and reanalysis without duplicates. Button testing used mocks; no live synchronization was triggered while implementing this feature.
+
+## Empty trash and Viewed cards — 2026-10-25
+
+- Added persistent Viewed toggles with a light blue card background, independent of bookmarks and follow-up status.
+- Added an Empty trash control with an explicit permanent-deletion checkbox. Purging removes only trashed offer records, associated notes/analyses and message links; minimal suppressed job IDs prevent reimport.
+- **42 tests passed**, covering UI highlighting, confirmation, purge scope, foreign-key cleanup, idempotency and suppression during subsequent synchronization. Permanent deletion was tested only with temporary synthetic data; no personal offers were modified or purged.
+
+## Preference adherence correction — 2026-10-25
+
+- Confirmed the current private preferences were read and fingerprinted: 25 existing analyses matched that profile. The issue was not an unread file.
+- Found historical multi-job digest contamination and responses confusing desired job conditions with CV attributes. Analysis now isolates one job's saved evidence, strips tracking URLs, prioritizes alternative acceptable preference combinations and requires atomic preference checks with supporting job quotes.
+- Added direct outdated-score warnings and a sidebar view of active preferences. Updated evaluation fingerprint so previous scores are marked stale.
+- Reanalyzed one real stored offer using local Ollama without Gmail access: score changed from 75 to 30 with low confidence. Final checks identified matching role/seniority, a location restriction mismatch, and unknown remote policy/salary. Other old scores require resynchronization.
+- **46 tests passed**, including per-job evidence isolation, exclusion of other jobs' facts, preference payload preservation and unsupported claims becoming unknown. Ruff checks passed.

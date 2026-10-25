@@ -7,11 +7,11 @@ from filelock import FileLock
 from jobmatch import gmail
 from jobmatch.analysis import analyze, fingerprint, profile
 from jobmatch.config import home, settings
-from jobmatch.parsing import extract
+from jobmatch.parsing import extract, analysis_evidence
 from jobmatch.storage import connect
 
 
-def sync(api=None, evaluator=analyze, max_analyses=None):
+def sync(api=None, evaluator=analyze, max_analyses=None, resync_all=False):
     with FileLock(str(home() / "sync.lock"), timeout=0):
         cfg = settings()
         candidate = profile()
@@ -51,31 +51,40 @@ def sync(api=None, evaluator=analyze, max_analyses=None):
                         ),
                     )
                     for job in jobs:
+                        if db.execute(
+                            "SELECT 1 FROM deleted_jobs WHERE id=?", (job.id,)
+                        ).fetchone():
+                            continue
                         db.execute(
-                            "INSERT OR IGNORE INTO jobs(id,title,url,context) VALUES (?,?,?,?)",
-                            (job.id, job.title, job.url, job.context),
+                            "INSERT OR IGNORE INTO jobs(id,title,url,context,company) VALUES (?,?,?,?,?)",
+                            (job.id, job.title, job.url, job.context, job.company),
                         )
                         db.execute(
                             "INSERT OR IGNORE INTO message_jobs VALUES (?,?)",
                             (message_id, job.id),
                         )
                 counts["messages"] += 1
-                if counts["messages"] >= cfg.max_messages:
+                if not resync_all and counts["messages"] >= cfg.max_messages:
                     break
             for row in db.execute(
-                "SELECT j.* FROM jobs j WHERE (analysis IS NULL OR profile_hash != ?) "
+                "SELECT j.* FROM jobs j WHERE deleted_at IS NULL AND (? OR analysis IS NULL OR profile_hash != ?) "
                 "AND EXISTS (SELECT 1 FROM message_jobs mj JOIN messages m ON m.id=mj.message_id "
                 "WHERE mj.job_id=j.id AND m.received >= ?) "
                 "ORDER BY first_seen DESC, id LIMIT ?",
-                (digest, since * 1000, max_analyses or cfg.max_analyses),
+                (
+                    resync_all,
+                    digest,
+                    since * 1000,
+                    -1 if resync_all else max_analyses or cfg.max_analyses,
+                ),
             ).fetchall():
                 try:
                     result = evaluator(
-                        {k: row[k] for k in ("title", "context")}, candidate, cfg.model
+                        analysis_evidence(dict(row)), candidate, cfg.model
                     )
                     with db:
                         db.execute(
-                            "UPDATE jobs SET analysis=?,profile_hash=?,error=NULL WHERE id=?",
+                            "UPDATE jobs SET analysis=?,profile_hash=?,error=NULL WHERE id=? AND deleted_at IS NULL",
                             (result.model_dump_json(), digest, row["id"]),
                         )
                     counts["analyzed"] += 1

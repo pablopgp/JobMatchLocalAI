@@ -7,7 +7,7 @@ name = "jobmatch-local-ai"
 version = "1.0.0"
 description = "Private Gmail job alert analysis with local Ollama inference"
 requires-python = ">=3.11"
-dependencies = ["beautifulsoup4>=4.12,<5", "google-api-python-client>=2.150,<3", "google-auth-oauthlib>=1.2,<2", "httpx>=0.28,<1", "pydantic>=2.10,<3", "streamlit>=1.45,<2", "filelock>=3.16,<4", "pywin32>=308; sys_platform == 'win32'"]
+dependencies = ["altair>=5.5,<6", "beautifulsoup4>=4.12,<5", "google-api-python-client>=2.150,<3", "google-auth-oauthlib>=1.2,<2", "httpx>=0.28,<1", "pydantic>=2.10,<3", "streamlit>=1.45,<2", "filelock>=3.16,<4", "pywin32>=308; sys_platform == 'win32'"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff>=0.11,<1"]

@@ -58,6 +58,13 @@ def evaluation(*args):
         reasons=["Python matches"],
         missing_information=["Salary", "Full requirements"],
         concerns=[],
+        preference_checks=[
+            {
+                "preference": "Remote work",
+                "status": "unknown",
+                "evidence": "Work arrangement is not fully described.",
+            }
+        ],
     )
 
 
@@ -258,3 +265,15 @@ def test_dashboard_hides_old_offers_without_deleting_them():
     app.checkbox[0].check().run()
     assert not app.exception
     assert app.metric[0].value == "1"
+
+
+def test_resync_all_reanalyzes_completed_offers_without_duplicates():
+    sync(api_for([mail()]), evaluation)
+    evaluator = MagicMock(side_effect=evaluation)
+    result = sync(api_for([mail()]), evaluator, resync_all=True)
+    assert result == {"messages": 0, "analyzed": 1, "errors": 0}
+    evaluator.assert_called_once()
+    with connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 1
+        db.execute("UPDATE messages SET received=0")
+    assert sync(api_for([]), evaluator, resync_all=True)["analyzed"] == 0
