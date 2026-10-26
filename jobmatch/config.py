@@ -1,18 +1,23 @@
 import json
 import os
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 
 class Settings(BaseModel):
-    model: str = "qwen2.5:7b"
+    model: str = "qwen3:4b-instruct"
+    ollama_url: Literal["http://localhost:11434", "http://127.0.0.1:11434"] = (
+        "http://localhost:11434"
+    )
     interval_hours: int = Field(default=3, ge=1, le=168)
     gmail_query: str = (
         "from:(jobalerts-noreply@linkedin.com OR jobs-noreply@linkedin.com)"
     )
-    initial_days: int = Field(default=30, ge=1, le=3650)
+    lookback_hours: int = Field(default=24, ge=1, le=87600)
     max_messages: int = Field(default=200, ge=1, le=5000)
+    max_analyses: int = Field(default=20, ge=1, le=5000)
 
 
 def home() -> Path:
@@ -29,7 +34,7 @@ def home() -> Path:
 def settings() -> Settings:
     path = home() / "settings.json"
     return (
-        Settings.model_validate_json(path.read_text("utf-8"))
+        Settings.model_validate_json(path.read_text("utf-8-sig"))
         if path.exists()
         else Settings()
     )
