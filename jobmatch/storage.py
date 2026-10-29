@@ -10,6 +10,8 @@ TRACKING_STATUSES = (
     "Rejected",
     "Closed",
 )
+OFFERS_FOLDER = 1
+VIEWED_FOLDER = 2
 
 
 def connect():
@@ -33,6 +35,8 @@ def connect():
       finished TEXT, status TEXT, messages INTEGER DEFAULT 0,
       analyzed INTEGER DEFAULT 0, errors INTEGER DEFAULT 0);
     CREATE TABLE IF NOT EXISTS deleted_jobs (id TEXT PRIMARY KEY);
+    CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE);
+    INSERT OR IGNORE INTO folders(id,name) VALUES (1,'Offers'),(2,'Viewed');
     """)
     db.execute("BEGIN IMMEDIATE")
     columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
@@ -43,16 +47,26 @@ def connect():
         "notes": "TEXT NOT NULL DEFAULT ''",
         "deleted_at": "TEXT",
         "viewed": "INTEGER NOT NULL DEFAULT 0",
+        "folder_id": "INTEGER NOT NULL DEFAULT 1",
     }
     for name, definition in additions.items():
         if name not in columns:
             db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
+            if name == "folder_id":
+                db.execute("UPDATE jobs SET folder_id=2 WHERE viewed=1")
     db.commit()
     return db
 
 
 def update_offer(
-    job_id, *, saved=None, status=None, notes=None, deleted=None, viewed=None
+    job_id,
+    *,
+    saved=None,
+    status=None,
+    notes=None,
+    deleted=None,
+    viewed=None,
+    folder_id=None,
 ):
     """Persist user actions without touching email evidence or analysis."""
     if status is not None and status not in TRACKING_STATUSES:
@@ -65,6 +79,7 @@ def update_offer(
         ("tracking_status", status),
         ("notes", notes),
         ("viewed", None if viewed is None else int(viewed)),
+        ("folder_id", folder_id),
     ):
         if value is not None:
             assignments.append(f"{column}=?")
@@ -78,9 +93,46 @@ def update_offer(
     db = connect()
     try:
         with db:
+            if (
+                folder_id is not None
+                and not db.execute(
+                    "SELECT 1 FROM folders WHERE id=?", (folder_id,)
+                ).fetchone()
+            ):
+                raise ValueError("Folder does not exist")
+            if viewed is not None and folder_id is None:
+                # Only default-folder transitions are automatic; custom folders stay put.
+                assignments.append(
+                    "folder_id=CASE WHEN folder_id=? THEN ? ELSE folder_id END"
+                )
+                values.extend(
+                    (
+                        OFFERS_FOLDER if viewed else VIEWED_FOLDER,
+                        VIEWED_FOLDER if viewed else OFFERS_FOLDER,
+                    )
+                )
+            if folder_id == VIEWED_FOLDER and viewed is None:
+                assignments.append("viewed=1")
             db.execute(
                 f"UPDATE jobs SET {','.join(assignments)} WHERE id=?", (*values, job_id)
             )
+    finally:
+        db.close()
+
+
+def create_folder(name):
+    name = name.strip()
+    if not name or len(name) > 80:
+        raise ValueError("Folder names must contain between 1 and 80 characters")
+    db = connect()
+    try:
+        with db:
+            try:
+                return db.execute(
+                    "INSERT INTO folders(name) VALUES (?)", (name,)
+                ).lastrowid
+            except sqlite3.IntegrityError:
+                raise ValueError("A folder with this name already exists") from None
     finally:
         db.close()
 

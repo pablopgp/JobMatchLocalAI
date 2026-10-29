@@ -6,7 +6,13 @@ import streamlit as st
 
 from jobmatch.analysis import fingerprint, profile
 from jobmatch.config import home, initialize, settings
-from jobmatch.storage import TRACKING_STATUSES, connect, update_offer, empty_trash
+from jobmatch.storage import (
+    TRACKING_STATUSES,
+    connect,
+    update_offer,
+    empty_trash,
+    create_folder,
+)
 from jobmatch.parsing import canonical_job, saved_job_details
 from jobmatch.ui import compatibility_chart
 from jobmatch import manual_sync
@@ -57,6 +63,29 @@ with st.sidebar:
 db = connect()
 include_archive = st.sidebar.checkbox("Include older saved offers", value=False)
 view = st.sidebar.radio("View", ["All offers", "Saved offers", "Trash"])
+folders = [dict(row) for row in db.execute("SELECT * FROM folders ORDER BY id")]
+folder_names = {folder["id"]: folder["name"] for folder in folders}
+with st.sidebar:
+    st.subheader("Folders")
+    folder_id = st.radio(
+        "Folder",
+        list(folder_names),
+        format_func=folder_names.get,
+        key="folder_selection",
+    )
+    with st.form("create_folder", clear_on_submit=True):
+        folder_name = st.text_input("New folder name", max_chars=80)
+        if st.form_submit_button("Create folder"):
+            try:
+                create_folder(folder_name)
+                st.session_state["folder_created"] = folder_name.strip()
+                db.close()
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+    if "folder_created" in st.session_state:
+        st.success(f"Folder created: {st.session_state.pop('folder_created')}")
+st.subheader(f"Folder: {folder_names[folder_id]}")
 if view == "Trash":
     with st.sidebar:
         with st.expander("Empty trash"):
@@ -82,10 +111,11 @@ try:
             "SELECT j.* FROM jobs j WHERE "
             "((?='Trash' AND deleted_at IS NOT NULL) OR (?!='Trash' AND deleted_at IS NULL)) "
             "AND (?!='Saved offers' OR saved=1) "
-            "AND (? IN ('Saved offers','Trash') OR saved=1 OR ? OR EXISTS "
+            "AND folder_id=? "
+            "AND (? IN ('Saved offers','Trash') OR folder_id!=1 OR saved=1 OR ? OR EXISTS "
             "(SELECT 1 FROM message_jobs mj JOIN messages m ON m.id=mj.message_id "
             "WHERE mj.job_id=j.id AND m.received >= ?)) ORDER BY saved DESC, first_seen DESC",
-            (view, view, view, view, include_archive, since),
+            (view, view, view, folder_id, view, include_archive, since),
         )
     ]
     runs = [
@@ -129,7 +159,9 @@ if outdated:
         f"{outdated} displayed analyses use older preferences or evaluation rules. Resynchronize all offers to update eligible scores."
     )
 st.caption(
-    "Saved offers remain available beyond the 24-hour window. Trash can be restored."
+    "Filed offers remain available beyond the 24-hour window."
+    if folder_id != 1
+    else "Saved offers remain available beyond the 24-hour window. Trash can be restored."
     if view != "All offers"
     else f"Showing offers received in the last {cfg.lookback_hours} hours, plus saved offers."
     if not include_archive
@@ -243,6 +275,17 @@ for row, result in items[(page - 1) * 12 : page * 12]:
                 ):
                     update_offer(row["id"], deleted=True)
                     st.rerun()
+                with st.form(f"move_{row['id']}"):
+                    destination = st.selectbox(
+                        "Move to folder",
+                        list(folder_names),
+                        index=list(folder_names).index(row["folder_id"]),
+                        format_func=folder_names.get,
+                        key=f"destination_{row['id']}",
+                    )
+                    if st.form_submit_button("Move offer"):
+                        update_offer(row["id"], folder_id=destination)
+                        st.rerun()
             if row["saved"] and view != "Trash":
                 with st.expander("Follow-up status and notes"):
                     with st.form(f"tracking_{row['id']}"):

@@ -98,3 +98,10 @@ This update supersedes the OAuth and real-data blockers above.
 - Added direct outdated-score warnings and a sidebar view of active preferences. Updated evaluation fingerprint so previous scores are marked stale.
 - Reanalyzed one real stored offer using local Ollama without Gmail access: score changed from 75 to 30 with low confidence. Final checks identified matching role/seniority, a location restriction mismatch, and unknown remote policy/salary. Other old scores require resynchronization.
 - **46 tests passed**, including per-job evidence isolation, exclusion of other jobs' facts, preference payload preservation and unsupported claims becoming unknown. Ruff checks passed.
+
+## Offer folders — 2026-10-29
+
+- Added persistent folders with built-in Offers/Viewed, custom folder creation, per-card move controls and folder-scoped views.
+- Viewed transitions move Offers → Viewed and Viewed → Offers; custom folders stay unchanged when toggling the flag. Manually moving to Viewed marks the record viewed.
+- Added an additive migration assigning historical viewed records to Viewed once. Custom/Viewed folders retain filed offers beyond the email lookback; synchronization limits remain unchanged.
+- **50 tests passed**, including default/custom transitions, duplicate-name validation, legacy migration and UI create/move/filter flows. No Gmail synchronization or inference was triggered.

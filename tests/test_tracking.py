@@ -160,6 +160,7 @@ def test_viewed_highlight_and_confirmed_empty_trash_ui():
     assert not app.exception
     with connect() as db:
         assert db.execute("SELECT viewed FROM jobs").fetchone()[0] == 1
+    next(r for r in app.radio if r.key == "folder_selection").set_value(2).run()
     viewed_style = str(app.get("html")[0].proto)
     assert "rgba(147,197,253,0.18)" in viewed_style
     assert "color:#0c4a6e" not in viewed_style
